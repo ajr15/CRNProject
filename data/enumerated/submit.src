@@ -1,0 +1,30 @@
+reactions=( "nh3+o2" "nh3+o2+h2" "nh3+o2+ch4" )
+reactions=( "nh3+o2" )
+for reaction in ${reactions[@]}; do
+    echo "submitting job $reaction"
+    mkdir $reaction
+    # archiving graphs from prev run
+    # saving in "archive" directory under the same date
+    datetime=`date +%d-%m-%Y_%H-%M`
+    archive_dir=archive/$datetime/
+    echo "archiving previous results at $archive_dir/$reaction"
+    mkdir -p $archive_dir
+    # copying important materials
+    mkdir $archive_dir/$reaction
+    cp $reaction/$reaction.out $archive_dir/$reaction
+    for directory in $reaction/*; do
+        if [ -d $directory ]; then
+            mkdir $archive_dir/$directory
+            for file in $directory/*.rxn; do
+                cp $file $archive_dir/$directory/
+            done
+        fi
+    done
+    # deleting prev run
+    rm $reaction/*
+    # copying DB file
+    cp ../db_files/joined.db $reaction/main.db
+    # running
+    /home/shachar/miniconda3/envs/general/bin/python run.py $reaction > $reaction/$reaction.out
+done
+ 

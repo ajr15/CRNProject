@@ -1,0 +1,17 @@
+{
+    "H": "[H]",
+    "H2": "[H][H]",
+    "O": "[O]",
+    "O2": "O=O",
+    "H2O": "O",
+    "OH": "[OH]",
+    "H2O2": "OO",
+    "HO2": "[OH][O]",
+    "O3": "[O1][O][O1]",
+    "OX": null,
+    "OHX": null,
+    "O2X": null,
+    "AR": null,
+    "HE": null,
+    "N2": null
+}
