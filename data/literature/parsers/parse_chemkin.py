@@ -1,7 +1,13 @@
+import pandas as pd
 import json
 from typing import List
 import numpy as np
-from utils import DummyReaction, DummySpecie, NasaPolynomial, build_rxn_tree, dummy_reactions_to_graph, add_atomization_energies
+from utils import DummyReaction, DummySpecie, build_rxn_tree, dummy_reactions_to_graph, add_atomization_energies
+import torinanet as tn
+from src.NasaPolynomial import NasaPolynomial
+
+R = 8.314462618 # universal gas constant
+CAL_TO_J = 4.184 # conversion between calories to jouls
 
 def read_species_from_list(species_list: List[str]):
     res = []
@@ -123,6 +129,54 @@ def read_source_species(directory: str) -> List[str]:
     source_species = [s.strip() for s in source_species if len(s.strip()) > 0]
     return source_species
 
+def specie_enthalpy(sp: tn.core.Specie, temperature: float):
+    if not "thermo" in sp.properties:
+        return None
+    s = sp.properties["thermo"]
+    poly = NasaPolynomial(**s)
+    return poly.h(temperature)
+
+def specie_entropy(sp: tn.core.Specie, temperature: float):
+    if not "thermo" in sp.properties:
+        return None
+    s = sp.properties["thermo"]
+    poly = NasaPolynomial(**s)
+    return poly.s(temperature)
+
+def calculate_reaction_energy(rxn: tn.core.Reaction, specie_energy_func):
+    """
+    Add reaction energy based on atomization energy, species enthalpy and gibbs free energy. 
+    """
+    products_e = [specie_energy_func(s) for s in rxn.products]
+    reactants_e = [specie_energy_func(s) for s in rxn.reactants]
+    if None in products_e or None in reactants_e:
+        return None
+    return sum(products_e) - sum(reactants_e)
+
+def estimate_reaction_kinetics(rxn_graph: tn.core.RxnGraph, default_temperature: float=600):
+    """
+    Estimate reaction rate parameters
+    """
+    for rxn in rxn_graph.reactions:
+        if not pd.isna(rxn.properties.get("rEa", pd.NA)) and \
+            not pd.isna(rxn.properties.get("rA", pd.NA)) and \
+            not pd.isna(rxn.properties.get("rbeta", pd.NA)):
+            h = calculate_reaction_energy(rxn, lambda s: specie_enthalpy(s, default_temperature))
+            s = calculate_reaction_energy(rxn, lambda s: specie_entropy(s, default_temperature))
+            dn = calculate_reaction_energy(rxn, lambda s: 1)
+            if h is None or s is None:
+                continue
+            # note that we calculate using the reverse reaction h and s, so we need to negate them
+            rxn.properties["Ea"] = h + rxn.properties["rEa"] * CAL_TO_J
+            rxn.properties["A"] = rxn.properties["rA"] * np.exp(s / R) * 1 / R ** dn
+            rxn.properties["beta"] = rxn.properties["rbeta"] + dn
+        elif not pd.isna(rxn.properties.get("Ea", pd.NA)):
+            # fix Ea to be in J/mol
+            rxn.properties["Ea"] = rxn.properties["Ea"] * CAL_TO_J
+        # calculate the logk via arrhenius relation
+        rxn.properties["logk"] = np.log(rxn.properties["A"]) + rxn.properties["beta"] * np.log(default_temperature) - rxn.properties["Ea"] / (R * default_temperature)
+    return rxn_graph
+
 def read_network(source: str):
     db_path = "../joined.db"
     print("reading mechanism from {}...".format(source))
@@ -137,13 +191,13 @@ def read_network(source: str):
     with open(source + "/smiles.json", "r") as f:
         symbols_to_smiles = json.load(f)
     g = add_atomization_energies(db_path, g, symbols_to_smiles)
+    g = estimate_reaction_kinetics(rxn_graph=g, default_temperature=600)
     print("n reactions:", g.get_n_reactions())
     print("n species:", g.get_n_species())
     g.save("./{}.rxn".format(source))
 
 if __name__ == "__main__":
     read_network("ammonia")
-    exit()
     read_network("hydrogen")
     read_network("methane")
 
